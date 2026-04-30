@@ -10,5 +10,6 @@ public class Order {
     private double lon;
     private LocalTime openTime;
     private LocalTime closeTime;
+    private double weight;
     private int requiredExperienceLevel;
 }

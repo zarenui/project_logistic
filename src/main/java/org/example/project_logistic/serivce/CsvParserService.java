@@ -37,6 +37,7 @@ public class CsvParserService {
                 order.setLon(Double.parseDouble(record.get("lon")));
                 order.setOpenTime(LocalTime.parse(record.get("open_time"), TIME_FORMATTER));
                 order.setCloseTime(LocalTime.parse(record.get("close_time"), TIME_FORMATTER));
+                order.setWeight(Double.parseDouble(getValue(record, "weight", "0")));
                 order.setRequiredExperienceLevel(Integer.parseInt(getValue(record, "required_experience_level", "1")));
                 orders.add(order);
             }

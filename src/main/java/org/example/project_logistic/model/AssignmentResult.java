@@ -2,12 +2,17 @@ package org.example.project_logistic.model;
 
 import lombok.AllArgsConstructor;
 import lombok.Data;
+import lombok.NoArgsConstructor;
+
 import java.util.List;
 import java.util.Map;
 
+@NoArgsConstructor // Создает пустой конструктор
+@AllArgsConstructor // Создает конструктор со всеми полями
 @Data
-@AllArgsConstructor
 public class AssignmentResult {
-    private Map<String, List<String>> assignments; // driverId -> list of orderIds
-    private List<String> unassignedOrders;
+    // Карта: ID водителя -> Список объектов заказов
+    private Map<String, List<Order>> assignments;
+    // Список объектов заказов, которые не удалось назначить
+    private List<Order> unassignedOrders;
 }

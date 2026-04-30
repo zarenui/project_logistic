@@ -25,6 +25,6 @@ public class AssignmentController {
         List<Order> orders = csvParserService.parseOrders(ordersFile);
         List<Driver> drivers = csvParserService.parseDrivers(driversFile);
 
-        return assignmentService.assign(orders, drivers);
+        return assignmentService.assign(drivers, orders);
     }
 }
