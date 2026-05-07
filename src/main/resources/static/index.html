@@ -50,6 +50,7 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <!-- SheetJS для экспорта -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 
 <script>
     // Инициализация карты (центр Москвы)
@@ -127,22 +128,68 @@
     }
 
     function exportResults() {
-        if (!lastResult) {
-            alert("Сначала выполните расчет!");
+        console.log("Попытка экспорта... Текущий результат:", lastResult);
+
+        // 1. Проверка на наличие данных
+        if (!lastResult || (!lastResult.assignments && !lastResult.unassignedOrders)) {
+            alert("Нет данных для экспорта! Сначала нажмите 'Рассчитать назначение'.");
             return;
         }
 
-        const data = [];
-        Object.entries(lastResult.assignments).forEach(([driverId, orders]) => {
-            orders.forEach(orderId => {
-                data.push({ "ID Водителя": driverId, "ID Заказа": orderId });
-            });
-        });
+        try {
+            const exportData = [];
 
-        const worksheet = XLSX.utils.json_to_sheet(data);
-        const workbook = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(workbook, worksheet, "Assignments");
-        XLSX.writeFile(workbook, "Result_Assignments.xlsx");
+            // 2. Парсим назначенные заказы
+            if (lastResult.assignments) {
+                Object.entries(lastResult.assignments).forEach(([driverId, orders]) => {
+                    orders.forEach(order => {
+                        exportData.push({
+                            "Статус": "Назначен",
+                            "ID Водителя": driverId,
+                            "ID Заказа": order.orderId || "N/A",
+                            "Широта": order.lat || 0,
+                            "Долгота": order.lon || 0,
+                            "Время открытия": order.openTime || "",
+                            "Опыт": order.requiredExperienceLevel || 0
+                        });
+                    });
+                });
+            }
+
+            // 3. Парсим неназначенные заказы
+            if (lastResult.unassignedOrders) {
+                lastResult.unassignedOrders.forEach(order => {
+                    exportData.push({
+                        "Статус": "НЕ НАЗНАЧЕН",
+                        "ID Водителя": "-",
+                        "ID Заказа": order.orderId || "N/A",
+                        "Широта": order.lat || 0,
+                        "Долгота": order.lon || 0,
+                        "Время открытия": order.openTime || "",
+                        "Опыт": order.requiredExperienceLevel || 0
+                    });
+                });
+            }
+
+            console.log("Массив для Excel готов:", exportData);
+
+            if (exportData.length === 0) {
+                throw new Error("Массив данных пуст");
+            }
+
+            // 4. Генерация книги Excel
+            const worksheet = XLSX.utils.json_to_sheet(exportData);
+            const workbook = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(workbook, worksheet, "Assignments");
+
+            // 5. Финальный вызов скачивания
+            XLSX.writeFile(workbook, "Logistics_Results.xlsx");
+            console.log("Файл должен был скачаться");
+
+        } catch (error) {
+            console.error("Ошибка при генерации Excel:", error);
+            alert("Произошла ошибка при создании файла. Подробности в консоли (F12).");
+        }
     }
 </script>
 </body>
