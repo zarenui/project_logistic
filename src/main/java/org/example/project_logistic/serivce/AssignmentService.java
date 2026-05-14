@@ -1,4 +1,4 @@
-package org.example.project_logistic.serivce;
+package org.example.project_logistic.service;
 
 import org.example.project_logistic.model.AssignmentResult;
 import org.example.project_logistic.model.Driver;
@@ -13,40 +13,56 @@ import java.util.*;
 @Service
 public class AssignmentService {
 
+    // Координаты базы (депо), откуда все водители начинают путь
+    private static final double DEPOT_LAT = 55.7558;
+    private static final double DEPOT_LON = 37.6173;
+
     public AssignmentResult assign(List<Driver> drivers, List<Order> orders) {
         Map<String, List<Order>> assignments = new HashMap<>();
         List<Order> unassignedOrders = new ArrayList<>();
 
+        // 1. Подготовка водителей
         for (Driver driver : drivers) {
+            // Условие: уровень опыта = макс. остановок
             driver.setMaxStops(driver.getExperienceLevel());
+            // Условие: макс. вес (например, 100кг на 1 уровень опыта, или возьми из поля)
+            // Если в классе Driver есть getVehicleCapacity(), используй его
             assignments.put(driver.getDriverId(), new ArrayList<>());
         }
 
+        // 2. Сортировка: сначала самые сложные заказы (требующие высокого опыта)
         orders.sort(Comparator.comparingInt(Order::getRequiredExperienceLevel).reversed());
 
         for (Order order : orders) {
             Driver bestDriver = null;
-            double minCost = Double.MAX_VALUE; // Теперь это не просто дистанция, а "стоимость" пути
+            double minCost = Double.MAX_VALUE;
 
-            // РАСЧЕТ ЗАРАНЕЕ: Получаем коэффициент для времени конкретного заказа
+            // Фактор пробок для текущего времени заказа
             double trafficFactor = getSmoothTrafficFactor(order.getOpenTime());
 
             for (Driver driver : drivers) {
-                boolean experienceMatch = driver.getExperienceLevel() >= order.getRequiredExperienceLevel();
-                boolean hasCapacity = assignments.get(driver.getDriverId()).size() < driver.getMaxStops();
+                List<Order> currentOrders = assignments.get(driver.getDriverId());
 
-                if (experienceMatch && hasCapacity) {
-                    // Базовое расстояние
-                    double baseDist = calculateDistance(55.75, 37.62, order.getLat(), order.getLon());
+                // ПРОВЕРКА 1: Опыт
+                boolean expMatch = driver.getExperienceLevel() >= order.getRequiredExperienceLevel();
 
-                    // Эффективное расстояние (с учетом пробок)
-                    double effectiveDist = baseDist * trafficFactor;
+                // ПРОВЕРКА 2: Лимит по количеству остановок
+                boolean stopsMatch = currentOrders.size() < driver.getMaxStops();
 
-                    // Штраф за загруженность (балансировка между водителями)
-                    double loadFactor = assignments.get(driver.getDriverId()).size() * 0.5;
+                // ПРОВЕРКА 3: Лимит по весу (используем наш метод)
+                double currentWeight = calculateCurrentLoad(currentOrders);
+                // Предположим, лимит веса = уровень опыта * 50 (или другое поле)
+                double maxWeightLimit = driver.getExperienceLevel() * 50.0;
+                boolean weightMatch = (currentWeight + order.getWeight()) <= maxWeightLimit;
 
-                    // Итоговая стоимость назначения
-                    double totalCost = effectiveDist + loadFactor;
+                if (expMatch && stopsMatch && weightMatch) {
+                    // РАСЧЕТ: Расстояние по дорогам через OSRM
+                    // Считаем от депо до точки заказа (или от последней точки водителя)
+                    double roadDist = calculateRoadDistance(DEPOT_LAT, DEPOT_LON, order.getLat(), order.getLon());
+
+                    // Итоговая стоимость: (Дороги * Пробки) + Штраф за занятость
+                    double loadPenalty = currentOrders.size() * 0.8;
+                    double totalCost = (roadDist * trafficFactor) + loadPenalty;
 
                     if (totalCost < minCost) {
                         minCost = totalCost;
@@ -67,55 +83,48 @@ public class AssignmentService {
         result.setUnassignedOrders(unassignedOrders);
         return result;
     }
-    // Вспомогательный метод для подсчета текущего веса в машине
-    private double calculateCurrentLoad(List<String> assignedOrderIds, List<Order> allOrders) {
-        return allOrders.stream()
-                .filter(o -> assignedOrderIds.contains(o.getOrderId()))
+
+    // Вспомогательный метод: теперь работает с List<Order> напрямую
+    private double calculateCurrentLoad(List<Order> assignedOrders) {
+        return assignedOrders.stream()
                 .mapToDouble(Order::getWeight)
                 .sum();
     }
 
-    // Метод расчета расстояния (формула гаверсинусов или упрощенная)
+    // Запасной метод: прямая линия
     private double calculateDistance(double lat1, double lon1, double lat2, double lon2) {
-        return Math.sqrt(Math.pow(lat2 - lat1, 2) + Math.pow(lon2 - lon1, 2));
+        // Упрощенная формула (в градусах), для точности лучше Haversine
+        return Math.sqrt(Math.pow(lat2 - lat1, 2) + Math.pow(lon2 - lon1, 2)) * 111.0;
     }
 
+    // Основной метод: реальные дороги
     private double calculateRoadDistance(double lat1, double lon1, double lat2, double lon2) {
         try {
-            // Используем публичный демо-сервер OSRM (для продакшена лучше поднять свой в Docker)
-            String url = String.format("http://router.project-osrm.org/route/v1/driving/%f,%f;%f,%f?overview=false",
+            // ВАЖНО: OSRM ждет параметры в формате (lon,lat;lon,lat)
+            String url = String.format(Locale.US, "http://router.project-osrm.org/route/v1/driving/%f,%f;%f,%f?overview=false",
                     lon1, lat1, lon2, lat2);
 
             RestTemplate restTemplate = new RestTemplate();
             String response = restTemplate.getForObject(url, String.class);
 
-            // Достаем дистанцию в метрах из JSON ответа
             JSONObject json = new JSONObject(response);
             return json.getJSONArray("routes")
                     .getJSONObject(0)
-                    .getDouble("distance") / 1000.0; // Переводим в км
+                    .getDouble("distance") / 1000.0; // в километры
         } catch (Exception e) {
-            // Если сервис упал, откатываемся к обычной математике (с запасом 30%)
-            return calculateDistance(lat1, lon1, lat2, lon2) * 1.3;
+            // Если OSRM недоступен или лимит запросов превышен
+            return calculateDistance(lat1, lon1, lat2, lon2) * 1.4; // +40% на изгибы дорог
         }
     }
-    // Расчет плавного коэффициента пробок (от 1.0 до 1.7)
-    private double getSmoothTrafficFactor(LocalTime time) {
-        if (time == null) return 1.0; // Защита от NPE
 
-        // Переводим время в минуты от полуночи (0 - 1440)
+    private double getSmoothTrafficFactor(LocalTime time) {
+        if (time == null) return 1.0;
         int minutes = time.getHour() * 60 + time.getMinute();
 
-        // Утренний час пик (пик в 08:30 = 510 минут). Ширина пика (sigma) = 90 минут.
-        double morningPeak = 0.7 * Math.exp(-Math.pow(minutes - 510, 2) / (2 * Math.pow(90, 2)));
+        // Пики: 08:30 (510 мин) и 18:30 (1110 мин)
+        double morning = 0.7 * Math.exp(-Math.pow(minutes - 510, 2) / (2 * Math.pow(80, 2)));
+        double evening = 0.7 * Math.exp(-Math.pow(minutes - 1110, 2) / (2 * Math.pow(100, 2)));
 
-        // Вечерний час пик (пик в 18:30 = 1110 минут). Ширина пика (sigma) = 120 минут.
-        double eveningPeak = 0.7 * Math.exp(-Math.pow(minutes - 1110, 2) / (2 * Math.pow(120, 2)));
-
-        // Итоговый коэффициент (база 1.0 + влияние пиков)
-        double factor = 1.0 + morningPeak + eveningPeak;
-
-        // Жестко ограничиваем максимум, чтобы из-за наложений не превысить 1.7
-        return Math.min(factor, 1.7);
+        return Math.min(1.0 + morning + evening, 1.7);
     }
 }
