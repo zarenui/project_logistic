@@ -1,4 +1,4 @@
-package org.example.project_logistic.service;
+package org.example.project_logistic.serivce;
 
 import org.example.project_logistic.model.AssignmentResult;
 import org.example.project_logistic.model.Driver;
@@ -119,12 +119,46 @@ public class AssignmentService {
 
     private double getSmoothTrafficFactor(LocalTime time) {
         if (time == null) return 1.0;
-        int minutes = time.getHour() * 60 + time.getMinute();
 
-        // Пики: 08:30 (510 мин) и 18:30 (1110 мин)
-        double morning = 0.7 * Math.exp(-Math.pow(minutes - 510, 2) / (2 * Math.pow(80, 2)));
-        double evening = 0.7 * Math.exp(-Math.pow(minutes - 1110, 2) / (2 * Math.pow(100, 2)));
+        // Время старта в минутах от начала дня
+        double startT = time.getHour() * 60 + time.getMinute();
+        // Интервал планирования (на сколько минут вперед мы "смотрим" пробки, например, 30 мин)
+        double delta = 30.0;
 
-        return Math.min(1.0 + morning + evening, 1.7);
+        // Вычисляем определенный интеграл функции пробок на отрезке [startT, startT + delta]
+        // и делим на длину отрезка, чтобы получить среднее значение
+        double averageTrafficIntensity = calculateIntegral(startT, startT + delta) / delta;
+
+        // Базовый коэф 1.0 + средняя интенсивность. Ограничиваем сверху 1.7
+        return Math.min(1.0 + averageTrafficIntensity, 1.7);
+    }
+
+    /**
+     * Численное интегрирование методом трапеций для функции плотности пробок
+     */
+    private double calculateIntegral(double a, double b) {
+        int n = 10; // Количество шагов разбиения для точности
+        double h = (b - a) / n;
+        double sum = 0.5 * (trafficDensity(a) + trafficDensity(b));
+
+        for (int i = 1; i < n; i++) {
+            sum += trafficDensity(a + i * h);
+        }
+
+        return sum * h;
+    }
+
+    /**
+     * Единая функция плотности пробок (сумма Гауссиан)
+     * Описывает "напряженность" трафика в конкретную минуту x
+     */
+    private double trafficDensity(double x) {
+        // Параметры утреннего пика (Амплитуда 0.7, Центр 08:30, Ширина 80)
+        double morning = 0.7 * Math.exp(-Math.pow(x - 510, 2) / (2 * Math.pow(80, 2)));
+
+        // Параметры вечернего пика (Амплитуда 0.7, Центр 18:30, Ширина 100)
+        double evening = 0.7 * Math.exp(-Math.pow(x - 1110, 2) / (2 * Math.pow(100, 2)));
+
+        return morning + evening;
     }
 }
